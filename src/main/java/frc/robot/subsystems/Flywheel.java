@@ -22,6 +22,7 @@ import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.system.plant.LinearSystemId;
 import edu.wpi.first.wpilibj.RobotController;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.simulation.FlywheelSim;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -104,6 +105,17 @@ public class Flywheel extends SubsystemBase {
     // and re-applied each periodic() so they can be adjusted without redeploying.
     private static final String kTunableSlot0kPKey = "Flywheel/Slot0 Tunable kP";
     private static final String kTunableSlot0TargetRPMKey = "Flywheel/Slot0 Tunable Target RPM";
+
+    // Dip/recovery tracking for ball-feed testing: watches for the measured RPM
+    // dropping more than kFlywheelAtSpeedTolerancePercent below target (a ball
+    // loading onto the flywheel) and times how long it takes atTargetSpeed() to
+    // become true again. Reset whenever the target RPM changes.
+    private double m_dipTrackingTargetRPM = 0.0;
+    private boolean m_inDip = false;
+    private double m_dipMinRPM = 0.0;
+    private double m_dipStartTimestamp = 0.0;
+    private double m_lastDipSizeRPM = 0.0;
+    private double m_lastRecoveryTimeSeconds = 0.0;
 
     /**
      * Runs the quasistatic (slow voltage ramp) SysId test, used to identify kS and kV.
@@ -288,6 +300,20 @@ public class Flywheel extends SubsystemBase {
     }
 
     /**
+     * @return true when the Slot0/VelocityVoltage target RPM is nonzero and the measured RPM is
+     *         within kFlywheelAtSpeedTolerancePercent of it. Used to gate ball-feed testing so a
+     *         game piece is only fed in once the flywheel has settled on speed.
+     */
+    public boolean atTargetSpeed() {
+        double targetRPM = m_lastSlot0TargetRPM;
+        if (targetRPM == 0.0) {
+            return false;
+        }
+        double toleranceRPM = Math.abs(targetRPM) * (kFlywheelAtSpeedTolerancePercent / 100.0);
+        return Math.abs(getVelocityRPM() - targetRPM) <= toleranceRPM;
+    }
+
+    /**
      * Command factory: drives the flywheel to a fixed target velocity using
      * the Slot0/VelocityVoltage path while it runs, and stops the flywheel
      * when the command ends (interrupted or otherwise) so a button release
@@ -377,6 +403,46 @@ public class Flywheel extends SubsystemBase {
         SmartDashboard.putNumber("Flywheel/Actual Velocity (RPM)", actualVelocityRPS * 60.0);
         SmartDashboard.putNumber("Flywheel/Position (Rotations)", actualPositionRotations);
         SmartDashboard.putNumber("Flywheel/Stator Current (A)", motorCurrentAmps);
+
+        // 4. At-speed flag and dip/recovery tracking for ball-feed testing (Slot0/VelocityVoltage
+        //    path only). A "dip" is the measured RPM sagging more than the at-speed tolerance below
+        //    target while a ball loads onto the flywheel; recovery time is how long it takes
+        //    atTargetSpeed() to become true again afterward. Tracking resets when the target changes.
+        boolean atTarget = atTargetSpeed();
+        SmartDashboard.putBoolean("Flywheel/At Target Speed", atTarget);
+        SignalLogger.writeBoolean("Flywheel/At Target Speed", atTarget);
+
+        double targetRPM = m_lastSlot0TargetRPM;
+        double measuredRPM = getVelocityRPM();
+        if (targetRPM != m_dipTrackingTargetRPM) {
+            m_dipTrackingTargetRPM = targetRPM;
+            m_inDip = false;
+            m_dipMinRPM = 0.0;
+            m_lastDipSizeRPM = 0.0;
+            m_lastRecoveryTimeSeconds = 0.0;
+        }
+        if (targetRPM != 0.0) {
+            double dipThresholdRPM = targetRPM * (1.0 - kFlywheelAtSpeedTolerancePercent / 100.0);
+            if (measuredRPM < dipThresholdRPM) {
+                if (!m_inDip) {
+                    m_inDip = true;
+                    m_dipMinRPM = measuredRPM;
+                    m_dipStartTimestamp = Timer.getFPGATimestamp();
+                } else {
+                    m_dipMinRPM = Math.min(m_dipMinRPM, measuredRPM);
+                }
+            } else if (m_inDip && atTarget) {
+                m_lastDipSizeRPM = targetRPM - m_dipMinRPM;
+                m_lastRecoveryTimeSeconds = Timer.getFPGATimestamp() - m_dipStartTimestamp;
+                m_inDip = false;
+            }
+        }
+        SmartDashboard.putNumber("Flywheel/Dip Min RPM", m_dipMinRPM);
+        SmartDashboard.putNumber("Flywheel/Dip Size RPM", m_lastDipSizeRPM);
+        SmartDashboard.putNumber("Flywheel/Recovery Time (s)", m_lastRecoveryTimeSeconds);
+        SignalLogger.writeDouble("Flywheel/Dip Min RPM", m_dipMinRPM);
+        SignalLogger.writeDouble("Flywheel/Dip Size RPM", m_lastDipSizeRPM);
+        SignalLogger.writeDouble("Flywheel/Recovery Time (s)", m_lastRecoveryTimeSeconds);
     }
 
     @Override

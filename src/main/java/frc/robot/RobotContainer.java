@@ -4,6 +4,7 @@
 
 package frc.robot;
 
+import frc.robot.Constants.IOConstants;
 import frc.robot.Constants.OperatorConstants;
 import frc.robot.commands.Autos;
 import frc.robot.subsystems.DriveSubsystem;
@@ -59,7 +60,6 @@ public class RobotContainer {
                 () -> -m_driverController.getLeftY(), () -> -m_driverController.getRightX()));
 
         /* TO DO: Add bindings here */
-        m_driverController.a().onTrue(m_intake.runIntakeCommand());
         m_driverController.back().and(m_driverController.y())
             .whileTrue(m_flywheel.sysIdQuasistatic(SysIdRoutine.Direction.kForward));
         m_driverController.back().and(m_driverController.a())
@@ -69,12 +69,30 @@ public class RobotContainer {
         m_driverController.start().and(m_driverController.a())
             .whileTrue(m_flywheel.sysIdDynamic(SysIdRoutine.Direction.kReverse));
 
-        // Fixed-RPM presets for bench testing the Slot0/VelocityVoltage closed
-        // loop (Flywheel.runAtRPM()) while gains are being tuned.
-        m_driverController.leftBumper().whileTrue(m_flywheel.runAtRPM(1000));
-        m_driverController.rightBumper().whileTrue(m_flywheel.runAtRPM(1500));
-        m_driverController.x().whileTrue(m_flywheel.runAtRPM(2000));
+        // 1-meter hub shooting presets for the Slot0/VelocityVoltage closed loop
+        // (Flywheel.runAtRPM()), tested between 3000 and 4000 RPM from 1 meter off the hub.
+        m_driverController.leftBumper().whileTrue(m_flywheel.runAtRPM(3250));
+        m_driverController.rightBumper().whileTrue(m_flywheel.runAtRPM(3500));
+        m_driverController.x().whileTrue(m_flywheel.runAtRPM(3750));
 
+        // Ball-feed testing: hold B to run the indexer (Loader) and intake together at a
+        // constant duty cycle regardless of flywheel speed. Hold Y to run them only while the
+        // flywheel has settled on its target RPM (Flywheel.atTargetSpeed()) — both pause/resume
+        // together each cycle so a second ball doesn't press against the first while the loader
+        // is paused waiting for the flywheel to come back up to speed.
+        m_driverController.b().whileTrue(
+            m_loader.feed(IOConstants.kIndexerFeedPercent)
+                .alongWith(m_intake.runIntakeCommand()));
+        m_driverController.y().whileTrue(
+            m_loader.feedWhen(-IOConstants.kLoaderToFlywheelOutput, m_flywheel::atTargetSpeed)
+                .alongWith(m_intake.runIntakeWhen(m_flywheel::atTargetSpeed)));
+
+        // One-button shoot: hold A to spin the flywheel up to the 1-meter preset and feed/intake
+        // a ball in once it's settled on speed, gated the same way as the Y binding above.
+        m_driverController.a().whileTrue(
+            m_flywheel.runAtRPM(3500)
+                .alongWith(m_loader.feedWhen(-IOConstants.kLoaderToFlywheelOutput, m_flywheel::atTargetSpeed))
+                .alongWith(m_intake.runIntakeWhen(m_flywheel::atTargetSpeed)));
     }
 
     /**

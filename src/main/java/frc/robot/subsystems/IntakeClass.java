@@ -12,6 +12,8 @@ import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.ctre.phoenix6.signals.InvertedValue;
   
+import java.util.function.BooleanSupplier;
+
 import edu.wpi.first.epilogue.Logged;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -55,6 +57,24 @@ public class IntakeClass extends SubsystemBase {
         return run(() -> m_intakeMotor.setControl(m_dutyCycleRequest.withOutput(kIntakeDefaultOutput)))
             .finallyDo(() -> m_intakeMotor.stopMotor())
             .withName("runIntake");
+    }
+
+    /**
+     * Like runIntakeCommand(), but only actually drives the motor while {@code condition} is
+     * true (e.g. Flywheel::atTargetSpeed), so the intake pauses whenever the condition goes
+     * false instead of ending the command — used to gate the intake alongside Loader.feedWhen()
+     * so a second ball doesn't press against the first while the loader is paused.
+     *
+     * @param condition supplier checked every cycle; the motor is stopped whenever it's false
+     */
+    public Command runIntakeWhen(BooleanSupplier condition) {
+        return run(() -> {
+            if (condition.getAsBoolean()) {
+                m_intakeMotor.setControl(m_dutyCycleRequest.withOutput(kIntakeDefaultOutput));
+            } else {
+                m_intakeMotor.stopMotor();
+            }
+        }).finallyDo(() -> m_intakeMotor.stopMotor()).withName("runIntakeWhen");
     }
 
     /**

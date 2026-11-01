@@ -13,7 +13,11 @@ import com.revrobotics.PersistMode;
 //import com.revrobotics.RelativeEncoder;
 import com.revrobotics.ResetMode;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
+import com.ctre.phoenix6.SignalLogger;
 
+import java.util.function.BooleanSupplier;
+
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
@@ -30,6 +34,10 @@ public class Loader extends SubsystemBase {
 
     private final SparkMax m_loaderMotor;
 
+    // Last duty cycle commanded to the loader motor, kept only so periodic() can log it for
+    // ball-feed testing (e.g. to see on the log when feed()/feedWhen() actually ran the motor).
+    private double m_lastCommandedOutput = 0.0;
+
     /** Creates a new Loader subsystem, configuring the loader's SparkMax. */
     public Loader() {
         m_loaderMotor = new SparkMax(kLoaderMotorID, MotorType.kBrushless);
@@ -42,8 +50,45 @@ public class Loader extends SubsystemBase {
 
     /** Shared open-loop helper — runs the loader motor at the given duty cycle while active. */
     private Command runLoaderCommand(double output) {
-        return run(() -> m_loaderMotor.set(output))
-            .finallyDo(() -> m_loaderMotor.stopMotor());
+        return run(() -> {
+            m_loaderMotor.set(output);
+            m_lastCommandedOutput = output;
+        }).finallyDo(() -> stop());
+    }
+
+    /** Immediately stops the loader motor. */
+    public void stop() {
+        m_loaderMotor.stopMotor();
+        m_lastCommandedOutput = 0.0;
+    }
+
+    /**
+     * Command factory for ball-feed testing: runs the loader at a constant duty cycle while held,
+     * and stops it when released. Bind as a "hold to feed" button.
+     *
+     * @param percentOutput open-loop duty cycle ([-1, 1]) to feed at, e.g. kIndexerFeedPercent
+     */
+    public Command feed(double percentOutput) {
+        return runLoaderCommand(percentOutput).withName("loaderFeed");
+    }
+
+    /**
+     * Command factory for ball-feed testing: like feed(), but only actually drives the motor while
+     * {@code condition} is true (e.g. Flywheel::atTargetSpeed), so a ball is only fed in once the
+     * flywheel has settled on its target speed. Still stops the motor when released.
+     *
+     * @param percentOutput open-loop duty cycle ([-1, 1]) to feed at while condition is true
+     * @param condition supplier checked every cycle; the motor is stopped whenever it's false
+     */
+    public Command feedWhen(double percentOutput, BooleanSupplier condition) {
+        return run(() -> {
+            if (condition.getAsBoolean()) {
+                m_loaderMotor.set(percentOutput);
+                m_lastCommandedOutput = percentOutput;
+            } else {
+                stop();
+            }
+        }).finallyDo(() -> stop()).withName("loaderFeedWhen");
     }
 
     /**
@@ -72,7 +117,8 @@ public class Loader extends SubsystemBase {
 
     @Override
     public void periodic() {
-        // This method will be called once per scheduler run
+        SmartDashboard.putNumber("Indexer/Output", m_lastCommandedOutput);
+        SignalLogger.writeDouble("Indexer/Output", m_lastCommandedOutput);
     }
 
     @Override

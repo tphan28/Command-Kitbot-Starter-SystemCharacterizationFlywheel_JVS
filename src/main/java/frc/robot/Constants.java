@@ -110,6 +110,12 @@ public final class Constants {
         public static final double kFlywheelSlot0_kI = 0.0;
         public static final double kFlywheelSlot0_kD = 0.0;
 
+        /**
+         * Tolerance band, as a percent of target RPM, used by Flywheel.atTargetSpeed() to decide
+         * whether the Slot0/VelocityVoltage closed loop has settled on its commanded speed.
+         */
+        public static final double kFlywheelAtSpeedTolerancePercent = 3.0;
+
         // Simulation-only plant model (gear ratio + moment of inertia) so the
         // TalonFX has something to spin against in simulationPeriodic(). These
         // are guesses, not measurements — a sim-based SysId fit characterizes
@@ -152,6 +158,9 @@ public final class Constants {
          */
         public static final int kLoaderIntakeTargetRPM = 800;
         public static final int kLoaderToFlywheelTargetRPM = 800;
+
+        /** Open-loop duty cycle ([-1, 1]) for the ball-feed test commands (Loader.feed()/feedWhen()). */
+        public static final double kIndexerFeedPercent = 0.3;
     }
 
     public static class AutoConstants {
